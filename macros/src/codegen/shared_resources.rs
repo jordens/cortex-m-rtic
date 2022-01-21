@@ -84,6 +84,9 @@ pub fn codegen(
             // For future use
             // let doc = format!(" RTIC internal ({} resource): {}:{}", doc, file!(), line!());
 
+            // util::impl_mutex will have different implementations for
+            // armv7m and armv6
+            // TODO: maybe the checks are wrong for armv8
             mod_app.push(util::impl_mutex(
                 extra,
                 cfgs,
@@ -105,6 +108,61 @@ pub fn codegen(
             #(#mod_resources)*
         })
     };
+
+    // Computing mapping of used interrupts to masks
+    let interrupt_ids = analysis.interrupts.iter().map(|(p, (id, _))| (p, id));
+
+    use std::collections::HashMap;
+    let mut masks: HashMap<u8, _> = std::collections::HashMap::new();
+    let device = &extra.device;
+
+    for p in 0..=4 {
+        masks.insert(p, quote!(0));
+    }
+
+    for (&priority, name) in interrupt_ids.chain(app.hardware_tasks.values().flat_map(|task| {
+        if !util::is_exception(&task.args.binds) {
+            Some((&task.args.priority, &task.args.binds))
+        } else {
+            // We treat exceptions separately
+            None
+        }
+    })) {
+        let name = quote!(#device::Interrupt::#name as u32);
+
+        // println!("here --------- {:?} {:?}", name, priority);
+        match masks.get_mut(&priority) {
+            Some(v) => {
+                *v = quote!(#v | 1 << #name);
+            }
+            None => {
+                panic!("priority out of range");
+            }
+        };
+    }
+
+    // println!("{:?}", masks);
+    // let mut arr_masks = vec![quote!(0)];
+    // for i in 1..=4 {}
+    let mut mask_arr: Vec<(_, _)> = masks.iter().collect();
+    // println!("{:?}", mask_arr);
+
+    // println!("----");
+
+    mask_arr.sort_by_key(|(k, _v)| *k);
+
+    // println!("{:?}", mask_arr);
+
+    // println!("----");
+
+    let mask_arr: Vec<_> = mask_arr.iter().map(|(_, v)| v).collect();
+    // println!("{:?}", mask_arr);
+
+    //  [#(#mask_arr)*];
+    // mapping of priorities to
+    mod_app.push(quote!(
+        const MASKS: [u32; 5] = [#(#mask_arr),*];
+    ));
 
     (mod_app, mod_resources)
 }

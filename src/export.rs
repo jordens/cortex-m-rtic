@@ -159,12 +159,11 @@ pub unsafe fn lock<T, R>(
     }
 }
 
-/// Lock the resource proxy by setting the PRIMASK
-/// and running the closure with interrupt::free
+/// TODO
 ///
 /// # Safety
 ///
-/// Writing to the PRIMASK
+/// TODO
 /// Dereferencing a raw pointer
 #[cfg(not(armv7m))]
 #[inline(always)]
@@ -172,16 +171,24 @@ pub unsafe fn lock<T, R>(
     ptr: *mut T,
     priority: &Priority,
     ceiling: u8,
-    _nvic_prio_bits: u8,
+    nvic_prio_bits: u8,
+    _masks: &[u32; 5],
     f: impl FnOnce(&mut T) -> R,
 ) -> R {
     let current = priority.get();
 
     if current < ceiling {
-        priority.set(u8::max_value());
-        let r = interrupt::free(|_| f(&mut *ptr));
-        priority.set(current);
-        r
+        if ceiling == (1 << nvic_prio_bits) {
+            priority.set(u8::max_value());
+            let r = interrupt::free(|_| f(&mut *ptr));
+            priority.set(current);
+            r
+        } else {
+            priority.set(current);
+            let r = interrupt::free(|_| f(&mut *ptr));
+            priority.set(current);
+            r
+        }
     } else {
         f(&mut *ptr)
     }
