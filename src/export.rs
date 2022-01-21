@@ -165,6 +165,7 @@ pub unsafe fn lock<T, R>(
 ///
 /// TODO
 /// Dereferencing a raw pointer
+
 #[cfg(not(armv7m))]
 #[inline(always)]
 pub unsafe fn lock<T, R>(
@@ -172,7 +173,7 @@ pub unsafe fn lock<T, R>(
     priority: &Priority,
     ceiling: u8,
     nvic_prio_bits: u8,
-    _masks: &[u32; 5],
+    masks: &[u32; 5],
     f: impl FnOnce(&mut T) -> R,
 ) -> R {
     let current = priority.get();
@@ -184,14 +185,45 @@ pub unsafe fn lock<T, R>(
             priority.set(current);
             r
         } else {
+            // safe to set outside critical section
             priority.set(current);
-            let r = interrupt::free(|_| f(&mut *ptr));
+            let mask = compute_mask(current, ceiling, masks);
+            cortex_m_semihosting::hprintln!("clear_enable_mask {:08b}", mask).ok();
+            clear_enable_mask(mask);
+            // inside critical section
+            let r = f(&mut *ptr);
+            // still inside critical section
+            cortex_m_semihosting::hprintln!("set_enable_mask {:08b}", mask).ok();
+            set_enable_mask(mask);
+
+            // safe todo outside the critical section
             priority.set(current);
             r
         }
     } else {
         f(&mut *ptr)
     }
+}
+
+#[inline(always)]
+fn compute_mask(from_prio: u8, to_prio: u8, masks: &[u32; 5]) -> u32 {
+    let mut res = 0;
+    masks[from_prio as usize..=to_prio as usize]
+        .iter()
+        .for_each(|m| res |= m);
+    res
+}
+
+// enables interrupts
+#[inline(always)]
+unsafe fn set_enable_mask(mask: u32) {
+    (*NVIC::ptr()).iser[0].write(mask)
+}
+
+// disables interrupts
+#[inline(always)]
+unsafe fn clear_enable_mask(mask: u32) {
+    (*NVIC::ptr()).icer[0].write(mask)
 }
 
 #[inline]
