@@ -124,42 +124,41 @@ pub fn codegen(
         if !util::is_exception(&task.args.binds) {
             Some((&task.args.priority, &task.args.binds))
         } else {
-            // We treat exceptions separately
+            // TODO: exceptions not implemented
             None
         }
     })) {
         let name = quote!(#device::Interrupt::#name as u32);
-
-        // println!("here --------- {:?} {:?}", name, priority);
         match masks.get_mut(&(priority - 1)) {
             Some(v) => {
                 *v = quote!(#v | 1 << #name);
             }
             None => {
-                panic!("priority out of range");
+                // We would want proper error handling but not currently possible
+                // let error = syn::Error::new_spanned(
+                //     name,
+                //     "priority out of range, v6m only support 4 levels",
+                // );
+                // // report error only for non v7m
+                // #[cfg(not(armv7m))]
+                // mod_app.push(error.to_compile_error());
+
+                // what we do instead is to push a dummy mask value
+                // this will cause a compilation for the MASK array.
+                masks.insert(priority - 1, quote!(0));
             }
         };
     }
 
-    // println!("{:?}", masks);
-    // let mut arr_masks = vec![quote!(0)];
-    // for i in 1..=4 {}
     let mut mask_arr: Vec<(_, _)> = masks.iter().collect();
-    // println!("{:?}", mask_arr);
-
-    // println!("----");
-
     mask_arr.sort_by_key(|(k, _v)| *k);
-
-    // println!("{:?}", mask_arr);
-
-    // println!("----");
-
     let mask_arr: Vec<_> = mask_arr.iter().map(|(_, v)| v).collect();
-    // println!("{:?}", mask_arr);
 
     mod_app.push(quote!(
+        #[cfg(not(armv7m))]
         const MASKS: [u32; 4] = [#(#mask_arr),*];
+        #[cfg(armv7m)]
+        const MASKS: [u32; 4] = [0u32; 4];
     ));
 
     (mod_app, mod_resources)

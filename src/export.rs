@@ -122,13 +122,40 @@ where
 {
 }
 
-/// Lock the resource proxy by setting the BASEPRI
-/// and running the closure with interrupt::free
+/// Lock implementation using BASEPRI and global CS
 ///
 /// # Safety
 ///
-/// Writing to the BASEPRI
-/// Dereferencing a raw pointer
+/// The system ceiling is raised from current to ceiling
+/// by computing a either
+/// - rasing the BASEPRI to the ceiling value, or
+/// - disable all interrupts in case we are want to
+///   mask interrupts with maximum priority
+///
+/// Dereferencing a raw pointer inside CS
+///
+/// The priority.set/priority.get can safely be outside of the CS
+/// As being a context local cell (not affected by preemptions).
+/// It is merely used in order to omit masking in case current
+/// priority is current priority >= ceiling.
+///
+/// Lock Efficiency:
+/// Experiments validate (sub)-zero cost for CS implementation
+/// (Sub)-zero as:
+/// - Either zero OH (lock optimized out), or
+/// - Amounting to an optimal assembly implementation
+///   - The BASEPRI value is folded to a constant at compile time
+///   - CS entry, single assembly instruction to write BASEPRI
+///   - CS exit, single assembly instruction to write BASEPRI
+///   - priority.set/get optimized out (their effect not)
+/// - On par or better than any hand written implementation of SRP
+///
+/// Limitations:
+/// The current implementation reads/writes BASEPRI once
+/// even in some edge cases where this may be omitted.
+/// Total OH of per task is max 2 clock cycles, negligible in practice
+/// but can in theory be fixed.
+///
 #[cfg(armv7m)]
 #[inline(always)]
 pub unsafe fn lock<T, R>(
@@ -136,6 +163,7 @@ pub unsafe fn lock<T, R>(
     priority: &Priority,
     ceiling: u8,
     nvic_prio_bits: u8,
+    _mask: &[u32; 4],
     f: impl FnOnce(&mut T) -> R,
 ) -> R {
     let current = priority.get();
@@ -159,13 +187,76 @@ pub unsafe fn lock<T, R>(
     }
 }
 
-/// TODO
+/// Lock implementation using interrupt masking
 ///
 /// # Safety
 ///
-/// TODO
-/// Dereferencing a raw pointer
+/// The system ceiling is raised from current to ceiling
+/// by computing a 32 bit `mask` (1 bit per interrupt)
+/// 1: ceiling >= priority > current
+/// 0: else
+///
+/// On CS entry, `clear_enable_mask(mask)` disables interrupts
+/// On CS exit,  `set_enable_mask(mask)` re-enables interrupts
+///
+/// The priority.set/priority.get can safely be outside of the CS
+/// As being a context local cell (not affected by preemptions).
+/// It is merely used in order to omit masking in case current
+/// priority is current priority >= ceiling.
+///
+/// Dereferencing a raw pointer is done safely inside the CS
+///
+/// Lock Efficiency:
+/// Early experiments validate (sub)-zero cost for CS implementation
+/// (Sub)-zero as:
+/// - Either zero OH (lock optimized out), or
+/// - Amounting to an optimal assembly implementation
+///   - The `mask` value is folded to a constant at compile time
+///   - CS entry, single write of the 32 bit `mask` to the `icer` register
+///   - CS exit, single write of the 32 bit `mask` to the `iser` register
+///   - priority.set/get optimized out (their effect not)
+/// - On par or better than any hand written implementation of SRP
+///
+/// Limitations:
+/// Current implementation does not allow for tasks with shared resources
+/// to be bound to exception handlers, as these cannot be masked in HW.
+///
+/// Possible solutions:
+/// - Mask exceptions by global critical sections (interrupt::free)
+/// - Temporary lower exception priority
+///
+/// These possible solutions are set goals for future work
+#[cfg(not(armv7m))]
+#[inline(always)]
+pub unsafe fn lock<T, R>(
+    ptr: *mut T,
+    priority: &Priority,
+    ceiling: u8,
+    _nvic_prio_bits: u8, // TODO: remove, no longer required.
+    masks: &[u32; 4],
+    f: impl FnOnce(&mut T) -> R,
+) -> R {
+    let current = priority.get();
+    if current < ceiling {
+        // safe to set outside critical section
+        priority.set(ceiling);
+        let mask = compute_mask(current, ceiling, masks);
+        clear_enable_mask(mask);
+        // inside critical section
+        let r = f(&mut *ptr);
+        // still inside critical section
+        set_enable_mask(mask);
 
+        // safe todo outside the critical section
+        priority.set(current);
+        r
+    } else {
+        let r = f(&mut *ptr);
+        r
+    }
+}
+
+// Debugging variant, kept for convenience
 // #[cfg(not(armv7m))]
 // #[inline(always)]
 // pub unsafe fn lock<T, R>(
@@ -203,35 +294,6 @@ pub unsafe fn lock<T, R>(
 
 #[cfg(not(armv7m))]
 #[inline(always)]
-pub unsafe fn lock<T, R>(
-    ptr: *mut T,
-    priority: &Priority,
-    ceiling: u8,
-    _nvic_prio_bits: u8, // TODO: remove, no longer required.
-    masks: &[u32; 4],
-    f: impl FnOnce(&mut T) -> R,
-) -> R {
-    let current = priority.get();
-    if current < ceiling {
-        // safe to set outside critical section
-        priority.set(ceiling);
-        let mask = compute_mask(current, ceiling, masks);
-        clear_enable_mask(mask);
-        // inside critical section
-        let r = f(&mut *ptr);
-        // still inside critical section
-        set_enable_mask(mask);
-
-        // safe todo outside the critical section
-        priority.set(current);
-        r
-    } else {
-        let r = f(&mut *ptr);
-        r
-    }
-}
-
-#[inline(always)]
 fn compute_mask(from_prio: u8, to_prio: u8, masks: &[u32; 4]) -> u32 {
     let mut res = 0;
     masks[from_prio as usize..to_prio as usize]
@@ -241,12 +303,14 @@ fn compute_mask(from_prio: u8, to_prio: u8, masks: &[u32; 4]) -> u32 {
 }
 
 // enables interrupts
+#[cfg(not(armv7m))]
 #[inline(always)]
 unsafe fn set_enable_mask(mask: u32) {
     (*NVIC::ptr()).iser[0].write(mask)
 }
 
 // disables interrupts
+#[cfg(not(armv7m))]
 #[inline(always)]
 unsafe fn clear_enable_mask(mask: u32) {
     (*NVIC::ptr()).icer[0].write(mask)

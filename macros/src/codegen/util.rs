@@ -19,9 +19,7 @@ pub fn fq_ident(task: &Ident) -> Ident {
     mark_internal_name(&format!("{}_FQ", task.to_string()))
 }
 
-/// Generates a `Mutex` implementation for armv7m
-#[cfg(armv7m)]
-#[inline(always)]
+/// Generates a `Mutex` implementation
 pub fn impl_mutex(
     extra: &Extra,
     cfgs: &[Attribute],
@@ -47,51 +45,6 @@ pub fn impl_mutex(
             fn lock<RTIC_INTERNAL_R>(&mut self, f: impl FnOnce(&mut #ty) -> RTIC_INTERNAL_R) -> RTIC_INTERNAL_R {
                 /// Priority ceiling
                 const CEILING: u8 = #ceiling;
-
-                unsafe {
-                    rtic::export::lock(
-                        #ptr,
-                        #priority,
-                        CEILING,
-                        #device::NVIC_PRIO_BITS,
-                        f,
-                    )
-                }
-            }
-        }
-    )
-}
-
-/// Generates a `Mutex` implementation far armv6m
-#[cfg(not(armv7m))]
-#[inline(always)]
-pub fn impl_mutex(
-    extra: &Extra,
-    cfgs: &[Attribute],
-    resources_prefix: bool,
-    name: &Ident,
-    ty: TokenStream2,
-    ceiling: u8,
-    ptr: TokenStream2,
-    // masks: &Ident,
-) -> TokenStream2 {
-    let (path, priority) = if resources_prefix {
-        (quote!(shared_resources::#name), quote!(self.priority()))
-    } else {
-        (quote!(#name), quote!(self.priority))
-    };
-
-    let device = &extra.device;
-    quote!(
-        #(#cfgs)*
-        impl<'a> rtic::Mutex for #path<'a> {
-            type T = #ty;
-
-            #[inline(always)]
-            fn lock<RTIC_INTERNAL_R>(&mut self, f: impl FnOnce(&mut #ty) -> RTIC_INTERNAL_R) -> RTIC_INTERNAL_R {
-                /// Priority ceiling
-                const CEILING: u8 = #ceiling;
-                // const MASKS: &[u32] = &[ #(#masks,)*];
 
                 unsafe {
                     rtic::export::lock(
@@ -107,6 +60,7 @@ pub fn impl_mutex(
         }
     )
 }
+
 /// Generates an identifier for the `INPUTS` buffer (`spawn` & `schedule` API)
 pub fn inputs_ident(task: &Ident) -> Ident {
     mark_internal_name(&format!("{}_INPUTS", task))
