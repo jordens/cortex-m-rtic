@@ -155,9 +155,9 @@ pub fn codegen(
     let mask_arr: Vec<_> = mask_arr.iter().map(|(_, v)| v).collect();
 
     mod_app.push(quote!(
-        #[cfg(not(armv7m))]
+        #[cfg(armv6m)]
         const MASKS: [u32; 4] = [#(#mask_arr),*];
-        #[cfg(armv7m)]
+        #[cfg(not(armv6m))]
         const MASKS: [u32; 4] = [0u32; 4];
     ));
 
