@@ -1,4 +1,4 @@
-//! examples/m0_perf_err.rs
+//! v6m-interrupt-not-enough.rs_no (not run atm)
 //!
 //! Expected behavior:
 //! should pass
