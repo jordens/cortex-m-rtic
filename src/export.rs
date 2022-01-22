@@ -166,49 +166,75 @@ pub unsafe fn lock<T, R>(
 /// TODO
 /// Dereferencing a raw pointer
 
+// #[cfg(not(armv7m))]
+// #[inline(always)]
+// pub unsafe fn lock<T, R>(
+//     ptr: *mut T,
+//     priority: &Priority,
+//     ceiling: u8,
+//     _nvic_prio_bits: u8, // TODO: remove, no longer required.
+//     masks: &[u32; 4],
+//     f: impl FnOnce(&mut T) -> R,
+// ) -> R {
+//     let current = priority.get();
+//     cortex_m_semihosting::hprintln!("- lock: current {}, ceiling {}", current, ceiling).ok();
+//     if current < ceiling {
+//         // safe to set outside critical section
+//         priority.set(ceiling);
+//         let mask = compute_mask(current, ceiling, masks);
+//         cortex_m_semihosting::hprintln!("- lock: enter, clear_enable_mask {:08b}", mask).ok();
+//         clear_enable_mask(mask);
+//         // inside critical section
+//         let r = f(&mut *ptr);
+//         // still inside critical section
+//         cortex_m_semihosting::hprintln!("- lock: exit,  set_enable_mask   {:08b}", mask).ok();
+//         set_enable_mask(mask);
+
+//         // safe todo outside the critical section
+//         priority.set(current);
+//         r
+//     } else {
+//         cortex_m_semihosting::hprintln!("- lock: free enter").ok();
+//         let r = f(&mut *ptr);
+//         cortex_m_semihosting::hprintln!("- lock: free exit").ok();
+//         r
+//     }
+// }
+
 #[cfg(not(armv7m))]
 #[inline(always)]
 pub unsafe fn lock<T, R>(
     ptr: *mut T,
     priority: &Priority,
     ceiling: u8,
-    nvic_prio_bits: u8,
-    masks: &[u32; 5],
+    _nvic_prio_bits: u8, // TODO: remove, no longer required.
+    masks: &[u32; 4],
     f: impl FnOnce(&mut T) -> R,
 ) -> R {
     let current = priority.get();
-
     if current < ceiling {
-        if ceiling == (1 << nvic_prio_bits) {
-            priority.set(u8::max_value());
-            let r = interrupt::free(|_| f(&mut *ptr));
-            priority.set(current);
-            r
-        } else {
-            // safe to set outside critical section
-            priority.set(current);
-            let mask = compute_mask(current, ceiling, masks);
-            cortex_m_semihosting::hprintln!("clear_enable_mask {:08b}", mask).ok();
-            clear_enable_mask(mask);
-            // inside critical section
-            let r = f(&mut *ptr);
-            // still inside critical section
-            cortex_m_semihosting::hprintln!("set_enable_mask {:08b}", mask).ok();
-            set_enable_mask(mask);
+        // safe to set outside critical section
+        priority.set(ceiling);
+        let mask = compute_mask(current, ceiling, masks);
+        clear_enable_mask(mask);
+        // inside critical section
+        let r = f(&mut *ptr);
+        // still inside critical section
+        set_enable_mask(mask);
 
-            // safe todo outside the critical section
-            priority.set(current);
-            r
-        }
+        // safe todo outside the critical section
+        priority.set(current);
+        r
     } else {
-        f(&mut *ptr)
+        let r = f(&mut *ptr);
+        r
     }
 }
 
 #[inline(always)]
-fn compute_mask(from_prio: u8, to_prio: u8, masks: &[u32; 5]) -> u32 {
+fn compute_mask(from_prio: u8, to_prio: u8, masks: &[u32; 4]) -> u32 {
     let mut res = 0;
-    masks[from_prio as usize..=to_prio as usize]
+    masks[from_prio as usize..to_prio as usize]
         .iter()
         .for_each(|m| res |= m);
     res

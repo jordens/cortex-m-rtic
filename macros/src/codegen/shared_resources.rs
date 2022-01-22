@@ -116,7 +116,7 @@ pub fn codegen(
     let mut masks: HashMap<u8, _> = std::collections::HashMap::new();
     let device = &extra.device;
 
-    for p in 0..=4 {
+    for p in 0..4 {
         masks.insert(p, quote!(0));
     }
 
@@ -131,7 +131,7 @@ pub fn codegen(
         let name = quote!(#device::Interrupt::#name as u32);
 
         // println!("here --------- {:?} {:?}", name, priority);
-        match masks.get_mut(&priority) {
+        match masks.get_mut(&(priority - 1)) {
             Some(v) => {
                 *v = quote!(#v | 1 << #name);
             }
@@ -158,10 +158,8 @@ pub fn codegen(
     let mask_arr: Vec<_> = mask_arr.iter().map(|(_, v)| v).collect();
     // println!("{:?}", mask_arr);
 
-    //  [#(#mask_arr)*];
-    // mapping of priorities to
     mod_app.push(quote!(
-        const MASKS: [u32; 5] = [#(#mask_arr),*];
+        const MASKS: [u32; 4] = [#(#mask_arr),*];
     ));
 
     (mod_app, mod_resources)
