@@ -134,18 +134,8 @@ pub fn codegen(
                 *v = quote!(#v | 1 << #name);
             }
             None => {
-                // We would want proper error handling but not currently possible
-                // let error = syn::Error::new_spanned(
-                //     name,
-                //     "priority out of range, v6m only support 4 levels",
-                // );
-                // // report error only for non v7m
-                // #[cfg(not(armv7m))]
-                // mod_app.push(error.to_compile_error());
-
-                // what we do instead is to push a dummy mask value
-                // this will cause a compilation for the MASK array.
-                masks.insert(priority - 1, quote!(0));
+                // Interrupt out of range, will be caught by linker
+                // TODO: emit const assert.
             }
         };
     }
@@ -155,10 +145,7 @@ pub fn codegen(
     let mask_arr: Vec<_> = mask_arr.iter().map(|(_, v)| v).collect();
 
     mod_app.push(quote!(
-        #[cfg(armv6m)]
         const MASKS: [u32; 4] = [#(#mask_arr),*];
-        #[cfg(not(armv6m))]
-        const MASKS: [u32; 4] = [0u32; 4];
     ));
 
     (mod_app, mod_resources)
