@@ -211,10 +211,15 @@ pub unsafe fn lock<T, R>(
 /// (Sub)-zero as:
 /// - Either zero OH (lock optimized out), or
 /// - Amounting to an optimal assembly implementation
-///   - The `mask` value is folded to a constant at compile time
-///   - CS entry, single write of the 32 bit `mask` to the `icer` register
-///   - CS exit, single write of the 32 bit `mask` to the `iser` register
-///   - priority.set/get optimized out (their effect not)
+///   - if ceiling == (1 << nvic_prio_bits)
+///     - we execute the closure in a global critical section (interrupt free)
+///     - CS entry cost, single write to core register
+///     - CS exit cost, single write to core register
+///   else
+///     - The `mask` value is folded to a constant at compile time
+///     - CS entry, single write of the 32 bit `mask` to the `icer` register
+///     - CS exit, single write of the 32 bit `mask` to the `iser` register
+/// - priority.set/get optimized out (their effect not)
 /// - On par or better than any hand written implementation of SRP
 ///
 /// Limitations:
@@ -232,25 +237,37 @@ pub unsafe fn lock<T, R>(
     ptr: *mut T,
     priority: &Priority,
     ceiling: u8,
-    _nvic_prio_bits: u8, // TODO: remove, no longer required.
+    nvic_prio_bits: u8,
     masks: &[u32; 4],
     f: impl FnOnce(&mut T) -> R,
 ) -> R {
     let current = priority.get();
     if current < ceiling {
-        // safe to set outside critical section
-        priority.set(ceiling);
-        let mask = compute_mask(current, ceiling, masks);
-        clear_enable_mask(mask);
-        // inside critical section
-        let r = f(&mut *ptr);
-        // still inside critical section
-        set_enable_mask(mask);
+        if ceiling == (1 << nvic_prio_bits) {
+            // safe to manipulate outside critical section
+            priority.set(ceiling);
+            // execute closure under protection of raised system ceiling
+            let r = interrupt::free(|_| f(&mut *ptr));
+            // safe to manipulate outside critical section
+            priority.set(current);
+            r
+        } else {
+            // safe to manipulate outside critical section
+            priority.set(ceiling);
+            let mask = compute_mask(current, ceiling, masks);
+            clear_enable_mask(mask);
 
-        // safe todo outside the critical section
-        priority.set(current);
-        r
+            // execute closure under protection of raised system ceiling
+            let r = f(&mut *ptr);
+
+            set_enable_mask(mask);
+
+            // safe to manipulate outside critical section
+            priority.set(current);
+            r
+        }
     } else {
+        // execute closure without raising system ceiling
         let r = f(&mut *ptr);
         r
     }
