@@ -163,7 +163,7 @@ pub unsafe fn lock<T, R>(
     priority: &Priority,
     ceiling: u8,
     nvic_prio_bits: u8,
-    _mask: &[u32; 4],
+    _mask: &[u32; 3],
     f: impl FnOnce(&mut T) -> R,
 ) -> R {
     let current = priority.get();
@@ -237,13 +237,13 @@ pub unsafe fn lock<T, R>(
     ptr: *mut T,
     priority: &Priority,
     ceiling: u8,
-    nvic_prio_bits: u8,
-    masks: &[u32; 4],
+    _nvic_prio_bits: u8,
+    masks: &[u32; 3],
     f: impl FnOnce(&mut T) -> R,
 ) -> R {
     let current = priority.get();
     if current < ceiling {
-        if ceiling == (1 << nvic_prio_bits) {
+        if ceiling >= 4 {
             // safe to manipulate outside critical section
             priority.set(ceiling);
             // execute closure under protection of raised system ceiling
@@ -311,7 +311,7 @@ pub unsafe fn lock<T, R>(
 
 #[cfg(not(armv7m))]
 #[inline(always)]
-fn compute_mask(from_prio: u8, to_prio: u8, masks: &[u32; 4]) -> u32 {
+fn compute_mask(from_prio: u8, to_prio: u8, masks: &[u32; 3]) -> u32 {
     let mut res = 0;
     masks[from_prio as usize..to_prio as usize]
         .iter()

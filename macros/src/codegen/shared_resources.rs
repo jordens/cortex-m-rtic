@@ -84,9 +84,6 @@ pub fn codegen(
             // For future use
             // let doc = format!(" RTIC internal ({} resource): {}:{}", doc, file!(), line!());
 
-            // util::impl_mutex will have different implementations for
-            // armv7m and armv6
-            // TODO: maybe the checks are wrong for armv8
             mod_app.push(util::impl_mutex(
                 extra,
                 cfgs,
@@ -116,7 +113,7 @@ pub fn codegen(
     let mut masks: HashMap<u8, _> = std::collections::HashMap::new();
     let device = &extra.device;
 
-    for p in 0..4 {
+    for p in 0..3 {
         masks.insert(p, quote!(0));
     }
 
@@ -145,7 +142,7 @@ pub fn codegen(
     let mask_arr: Vec<_> = mask_arr.iter().map(|(_, v)| v).collect();
 
     mod_app.push(quote!(
-        const MASKS: [u32; 4] = [#(#mask_arr),*];
+        const MASKS: [u32; 3] = [#(#mask_arr),*];
     ));
 
     (mod_app, mod_resources)
